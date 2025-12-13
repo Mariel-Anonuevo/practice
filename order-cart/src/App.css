@@ -1,0 +1,42 @@
+.card-body {
+  scrollbar-width: thin;
+  scrollbar-color: #dee2e6 #f8f9fa;
+}
+
+
+.card-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+
+.card-body::-webkit-scrollbar-thumb {
+  background-color: #dee2e6;
+  border-radius: 10px;
+}
+
+
+.btn-link {
+  color: #6c757d;
+  font-size: 1rem;
+}
+
+
+.btn-link:hover {
+  color: #495057;
+  text-decoration: underline;
+}
+
+
+.card-footer {
+  padding: 1rem;
+}
+
+
+@media (max-width: 576px) {
+  .card-header h1 {
+    font-size: 2rem;
+  }
+  .btn-dark {
+    font-size: 1rem;
+  }
+}
