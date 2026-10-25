@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { allWebServers } from './webServers';
 
 export default defineConfig({
   testDir: './tests',
@@ -15,13 +16,16 @@ export default defineConfig({
   // One test at a time
   workers: 1,
 
+  webServer: allWebServers,
+
+
   // HTML report
   reporter: 'html',
 
   use: {
     // Slow down actions for demo
     launchOptions: {
-      slowMo: 30000,
+      slowMo: 1000,
     },
 
     // Save trace when needed

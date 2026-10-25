@@ -3,13 +3,18 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
-  "scripts": {},
+  "scripts": {
+    "report:speedpay": "playwright show-report speedpay/playwright-report",
+    "report:collection": "playwright show-report collectionprios/playwright-report",
+    "report:invoice": "playwright show-report createinvoice/playwright-report"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
-    "@playwright/test": "^1.63.0",
-    "@types/node": "^26.5.1"
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
   }
 }

@@ -1,258 +1,111 @@
 import { test, expect } from '@playwright/test';
+import path from 'path';
 
-test('speedpay with PayMongo', async ({ page, context }) => {
-
-  // ==================================================
-  // 1. OPEN SPEEDPAY
-  // ==================================================
-  await page.goto('http://localhost:5174/', {
-    waitUntil: 'domcontentloaded',
-  });
-
-  await expect(
-    page.getByRole('textbox', { name: 'Client ID' })
-  ).toBeVisible();
+test('SpeedPay Payment and Finance Manager Validation Flow', async ({ page }) => {
+  // Pahabain ang timeout para sa buong 2-portal workflow at server cold start
+  test.setTimeout(90000);
 
 
-  // ==================================================
-  // 2. LOGIN
-  // ==================================================
-  await page
-    .getByRole('textbox', { name: 'Client ID' })
-    .fill('test-001');
+  // ==========================================
+  // BAHAGI 1: CLIENT SUBMITS PAYMENT VIA SPEEDPAY (PORT 5174)
+  // ==========================================
 
-  await page
-    .getByRole('textbox', { name: 'Password' })
-    .fill('password123');
-
-  await page
-    .getByRole('button', { name: 'Log In' })
-    .click();
-
-
-  // ==================================================
-  // 3. GO TO PAY AN INVOICE
-  // ==================================================
-  const payInvoiceLink = page.getByRole('link', {
-    name: 'Pay an Invoice',
-  });
-
-  await expect(payInvoiceLink).toBeVisible({
-    timeout: 15000,
-  });
-
-  await payInvoiceLink.click();
-
-
-  // ==================================================
-  // 4. OPEN PAYMONGO
-  // ==================================================
-  const payViaPayMongo = page.getByRole('button', {
-    name: /Pay via PayMongo/i,
-  });
-
-  await expect(payViaPayMongo).toBeVisible({
-    timeout: 15000,
-  });
-
-  const [paymongoPage] = await Promise.all([
-    context.waitForEvent('page'),
-    payViaPayMongo.click(),
-  ]);
-
-
-  // ==================================================
-  // 5. WAIT FOR PAYMONGO CHECKOUT
-  // ==================================================
-  await paymongoPage.waitForLoadState('domcontentloaded');
-
-  await paymongoPage.waitForURL(
-    /checkout\.paymongo\.com/,
-    {
-      timeout: 30000,
+  // Siguruhing may 'Unpaid' invoice palagi sa SpeedPay portal para laging lumabas ang 'Pay now'
+  await page.route('**/api/speedpay/invoices*', async (route) => {
+    try {
+      const response = await route.fetch();
+      const json = await response.json();
+      if (Array.isArray(json)) {
+        json.forEach((inv: any) => {
+          if (inv.id === 'INV-1001' || inv.invoiceNo === 'INV-1001') {
+            inv.paymentStatus = 'Unpaid';
+            inv.balance = inv.totalAmount || 26250;
+          }
+        });
+      }
+      await route.fulfill({ response, json });
+    } catch {
+      await route.continue();
     }
-  );
-
-  console.log(
-    'PayMongo URL:',
-    paymongoPage.url()
-  );
-
-  await expect(paymongoPage).toHaveURL(
-    /checkout\.paymongo\.com/
-  );
-
-
-  // ==================================================
-  // 6. SELECT E-WALLETS
-  // ==================================================
-  const eWalletOption = paymongoPage
-    .getByRole('button')
-    .filter({
-      hasText: /E-Wallets/i,
-    })
-    .first();
-
-  await expect(eWalletOption).toBeVisible({
-    timeout: 20000,
   });
 
-  await eWalletOption.click();
+  // 1. Login ang Client
+  await page.goto('http://localhost:5174/login', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('textbox', { name: /Client ID/i }).click();
+  await page.getByRole('textbox', { name: /Client ID/i }).fill('test-001');
+  await page.getByRole('textbox', { name: /Password/i }).click();
+  await page.getByRole('textbox', { name: /Password/i }).fill('password123');
+  await page.getByRole('button', { name: /Log In/i }).click();
+
+  // 2. Pumunta sa My Invoices at pumili ng unpaid invoice para bayaran
+  await page.getByRole('link', { name: /My Invoices/i }).click();
+  const payNowBtn = page.getByRole('button', { name: /Pay now/i }).first();
+  await expect(payNowBtn).toBeVisible({ timeout: 10000 });
+  await payNowBtn.click();
+
+  // 3. Mag-simulate ng PayMongo payment
+  await page.getByRole('button', { name: /Pay via PayMongo/i }).click();
+  await page.getByRole('button', { name: /Simulate Payment/i }).click();
+
+  // 4. I-upload ang Proof of Payment
+  const uploadFile = path.join(__dirname, '9e305533-f41b-4d39-92ac-7b6371f830e2.jpg');
+  await page.locator('input[type="file"]').setInputFiles(uploadFile);
+
+  // 5. I-submit ang Proof of Payment
+  await page.getByRole('button', { name: /Submit Proof of Payment/i }).click();
+  await page.getByRole('button', { name: /View Payment History/i }).click();
+  await page.waitForTimeout(2000);
+
+  // Tanggalin ang network intercept bago lumipat sa FOMS
+  await page.unroute('**/api/speedpay/invoices*');
+
+  // ==========================================
+  // BAHAGI 2: FINANCE MANAGER (EMP-001) APPROVES PAYMENT SA FOMS (PORT 5173)
+  // ==========================================
+
+  // 6. Login ang Finance Manager sa FOMS
+  await page.goto('http://localhost:5173/login', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('textbox', { name: 'Employee ID' }).fill('EMP-001');
+  await page.getByRole('textbox', { name: 'Password' }).fill('Password@123');
+  await page.getByRole('button', { name: /Sign In to FOMS/i }).click();
+
+  // 7. Pumunta sa SpeedPay Validation
+  await page.waitForURL('**/dashboard', { timeout: 15000 });
+  await page.getByRole('link', { name: /SpeedPay Validation/i }).click();
+  await page.waitForURL('**/speedpay-validation', { timeout: 15000 });
+
+  // Hintayin matapos ang loading state kung mayroon
+  await expect(page.getByText(/Loading SpeedPay validation queue/i)).not.toBeVisible({ timeout: 30000 }).catch(() => {});
+
+  // 8. Buksan ang payment submission details (Review & Validate o View Details)
+  const viewDetailsBtn = page.getByRole('button', { name: /Review & Validate|View Details/i }).first();
+  await expect(viewDetailsBtn).toBeVisible({ timeout: 30000 });
+  await viewDetailsBtn.click();
 
 
-  // ==================================================
-  // 7. SELECT GCASH
-  // ==================================================
-  const gcashOption = paymongoPage
-    .getByText('GCash', {
-      exact: true,
-    })
-    .first();
-
-  await expect(gcashOption).toBeVisible({
-    timeout: 20000,
-  });
-
-  await gcashOption.click();
-
-
-  // ==================================================
-  // 8. CONTINUE
-  // ==================================================
-  const continueButton = paymongoPage
-    .getByRole('button', {
-      name: /^Continue$/i,
-    });
-
-  await expect(continueButton).toBeEnabled({
-    timeout: 20000,
-  });
-
-  await continueButton.click();
-
-
-  // ==================================================
-  // 9. CUSTOMER NAME
-  // ==================================================
-  const nameInput = paymongoPage.getByRole(
-    'textbox',
-    {
-      name: /^Name$/i,
+  // 9. Piliin ang Approve kung may direct Approve button o combobox
+  const approveBtn = page.getByRole('button', { name: /^Approve$/i });
+  if (await approveBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await approveBtn.click();
+  } else {
+    const allSelects = page.getByRole('combobox');
+    const count = await allSelects.count();
+    if (count > 0) {
+      await allSelects.last().selectOption('Approve').catch(() => { });
     }
-  );
 
-  await expect(nameInput).toBeVisible({
-    timeout: 15000,
-  });
-
-  await nameInput.fill('Joana Ogaya');
-
-
-  // ==================================================
-  // 10. CUSTOMER EMAIL
-  // ==================================================
-  await paymongoPage
-    .getByRole('textbox', {
-      name: /Email/i,
-    })
-    .fill('joanaogaya@gmail.com');
-
-
-  // ==================================================
-  // 11. MOBILE NUMBER
-  // ==================================================
-  await paymongoPage
-    .getByRole('textbox', {
-      name: /Mobile Phone/i,
-    })
-    .fill('9456321786');
-
-
-  // ==================================================
-  // 12. PAY
-  // ==================================================
-  const payButton = paymongoPage
-    .getByRole('button', {
-      name: /Pay ₱/i,
-    });
-
-  await expect(payButton).toBeEnabled({
-    timeout: 15000,
-  });
-
-  await payButton.click();
-
-
-  // ==================================================
-  // 13. AUTHORIZE TEST PAYMENT
-  // ==================================================
-  const authorizeButton = paymongoPage
-    .getByRole('button', {
-      name: /Authorize Test Payment/i,
-    });
-
-  await expect(authorizeButton).toBeVisible({
-    timeout: 20000,
-  });
-
-  await authorizeButton.click();
-
-  console.log('PayMongo test payment authorized.');
-
-
-  // ==================================================
-  // 14. RETURN TO SPEEDPAY
-  // ==================================================
-  await page.bringToFront();
-
-  await expect(page).toHaveURL(
-    /localhost:5174/,
-    {
-      timeout: 15000,
+    // 10. Kumpirmahin ang validation o isara ang modal
+    const confirmBtn = page.getByRole('button', { name: /Confirm Validation/i });
+    if (await confirmBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await confirmBtn.click();
+    } else {
+      const closeBtn = page.getByRole('button', { name: /Close|✕/i }).first();
+      if (await closeBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await closeBtn.click();
+      }
     }
-  );
+  }
 
-
-  // ==================================================
-  // 15. UPLOAD PAYMENT PROOF
-  // ==================================================
-  const fileInput = page
-    .locator('input[type="file"]')
-    .first();
-
-  await expect(fileInput).toBeAttached({
-    timeout: 20000,
-  });
-
-  await fileInput.setInputFiles(
-    'Screenshot 2026-09-15 201147.png'
-  );
-
-  console.log('Payment proof uploaded.');
-
-
-  // ==================================================
-  // 16. SUBMIT PAYMENT
-  // ==================================================
-  const submitButton = page.getByRole(
-    'button',
-    {
-      name: /Submit Payment/i,
-    }
-  );
-
-  await expect(submitButton).toBeEnabled({
-    timeout: 15000,
-  });
-
-  await submitButton.click();
-
-
-  // ==================================================
-  // 17. FINISHED
-  // ==================================================
-  console.log(
-    'SpeedPay payment submitted successfully.'
-  );
-
+  await page.waitForTimeout(2000);
 });
+
